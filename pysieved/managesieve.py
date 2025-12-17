@@ -21,6 +21,7 @@
 # 26 November 2025 - Modified by F. Ioannidis.
 
 
+import errno
 import socketserver as SocketServer
 import sys
 import time
@@ -131,7 +132,7 @@ class RequestHandler(SocketServer.BaseRequestHandler):
         buffer = cast(bytes, buffer)
 
         while len(buffer) < n:
-            r = self.request.recv(n - len(buffer))
+            r = self.read(n - len(buffer))
 
             if not r:
                 raise Hangup()
@@ -159,7 +160,7 @@ class RequestHandler(SocketServer.BaseRequestHandler):
 
                 return s.decode()
 
-            r = self.request.recv(1024)
+            r = self.read(1024)
 
             if not r:
                 raise Hangup()
@@ -167,23 +168,37 @@ class RequestHandler(SocketServer.BaseRequestHandler):
             out += r
 
     def handle(self):
+        def _is_disconnect_error(exc: BaseException) -> bool:
+            if isinstance(
+                exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+            ):
+                return True
+            return isinstance(exc, OSError) and exc.errno in {
+                errno.EPIPE,
+                errno.ECONNRESET,
+                errno.ECONNABORTED,
+                errno.ESHUTDOWN,
+            }
+
+        self._raw_write = self.request.send
+        self._raw_read = self.request.recv
+
         def _write(content: str | bytes):
-            message = content
+            message = content.encode() if isinstance(content, str) else content
+            try:
+                return self._raw_write(message)
+            except BaseException as exc:
+                if _is_disconnect_error(exc):
+                    raise Hangup()
+                raise
 
-            if isinstance(content, str):
-                message = content.encode()
-
-            return self.request.send(message)
-
-        def _read(n: int) -> str:
-            """Read `n` bytes from socket and convert to string."""
-
-            received = self.request.recv(n)
-
-            if isinstance(received, bytes):
-                received = received.decode()
-
-            return received
+        def _read(n: int) -> bytes:
+            try:
+                return self._raw_read(n)
+            except BaseException as exc:
+                if _is_disconnect_error(exc):
+                    raise Hangup()
+                raise
 
         self.buf = b""
         self.write = _write
@@ -191,9 +206,8 @@ class RequestHandler(SocketServer.BaseRequestHandler):
 
         self.log(1, "Connect from %r" % (self.client_address,))
 
-        self.do_capability()
-
         try:
+            self.do_capability()
             while True:
                 try:
                     cmd = self.get_command()
@@ -220,10 +234,13 @@ class RequestHandler(SocketServer.BaseRequestHandler):
 
         except Hangup:
             pass
-        except:
+        except BaseException:
             _, t, v, tbinfo = compact_traceback()
             self.log(-1, "[ERROR] %s:%s %s" % (t, v, tbinfo))
-            self.bye(reason="Server error")
+            try:
+                self.bye(reason="Server error")
+            except Hangup:
+                pass
             raise
 
     def finish(self):
@@ -354,15 +371,15 @@ class RequestHandler(SocketServer.BaseRequestHandler):
         self.ok(reason="Begin TLS negotiation now")
 
         try:
-            self.buf = ""
+            self.buf = b""
             self.tls = TLSConnection(self.request)
             self.tls.handshakeServer(
                 certChain=self.tls_params["cert"],
                 privateKey=self.tls_params["key"],
                 reqCert=False,
             )
-            self.write = lambda s: self.tls.write(s)
-            self.read = lambda n: self.tls.read(n)
+            self._raw_write = self.tls.write
+            self._raw_read = self.tls.read
             return self.do_capability()
         except Exception:
             import traceback

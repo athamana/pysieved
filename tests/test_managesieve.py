@@ -7,6 +7,7 @@ from base import MockClient, MockConfig, MockFilesystem
 from config import DEFAULT_CONFIG
 
 from pysieved.main import Server, get_handler
+from pysieved.managesieve import RequestHandler
 
 
 class MockOptions:
@@ -276,3 +277,26 @@ class ManagesieveTest(TestCase):
         # Try to delete script
         response = self.client.deletescript(self.filter_name)
         self.assertEqual(response, b'NO "Script is active"\r\n')
+
+
+class DisconnectHandlingTest(TestCase):
+    def test_disconnect_during_server_greeting_is_handled(self) -> None:
+        """Ensure broken pipes don't bubble up as handler exceptions."""
+
+        class BrokenPipeSocket:
+            def send(self, _: bytes) -> int:
+                raise BrokenPipeError(32, "Broken pipe")
+
+            def recv(self, _: int) -> bytes:
+                return b""
+
+        class Handler(RequestHandler):
+            capabilities = "SIEVE"
+
+            def log(self, _: int, __: str):
+                return
+
+            def list_mech(self):
+                return ["PLAIN"]
+
+        Handler(BrokenPipeSocket(), ("127.0.0.1", 0), None)
