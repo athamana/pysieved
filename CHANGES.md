@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+#### 2025-12-19
+
+* `./pysieved/managesieve.py`: Added error handling for client disconnects during read/write.
+
+
 #### 2025-12-05
 
 * `./pysieved/main.py`: Added file-based logging with `WatchedFileHandler` and removed syslog usage.
