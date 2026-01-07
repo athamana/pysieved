@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+#### 2026-01-07
+
+* `./Makefile`: Added makefile to run the tests and close any left-over processes
+
 #### 2025-12-05
 
 * `./pysieved/main.py`: Added file-based logging with `WatchedFileHandler` and removed syslog usage.
