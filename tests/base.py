@@ -99,6 +99,16 @@ class MockClient:
             self.conn.settimeout(self._default_timeout)
             self.conn.connect((address, port))
 
+    def close(self) -> None:
+        try:
+            self.conn.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+
     def get_full_response(self) -> bytes:
         """Read all the received lines until the server stops responding until the timeout."""
 
@@ -108,6 +118,8 @@ class MockClient:
             try:
                 part = self.conn.recv(self.BUF_SIZE)
             except Exception:
+                break
+            if not part:
                 break
 
             full_response += part
